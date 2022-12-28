@@ -1,0 +1,99 @@
+version: "2"
+
+networks:
+  outline-internal:
+
+services:
+  outline_redis:
+    image: redis
+    restart: always
+    container_name: outline_redis
+    networks:
+      - outline-internal
+
+  outline_postgres:
+    image: postgres:13
+    restart: always
+    container_name: outline_postgres
+    # command: bash -c "chmod 700 -R /var/lib/postgresql/data"
+    environment:
+      - POSTGRES_PASSWORD=outline
+      - POSTGRES_USER=outline
+      - POSTGRES_DB=outline
+    networks:
+      - outline-internal
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data 777
+
+  outline_minio:
+    image: minio/minio
+    restart: always
+    container_name: outline_minio
+    command: server --console-address 0.0.0.0:9001 /data
+    volumes:
+      - ./data/minio-data:/data:Z
+    environment:
+      - MINIO_ROOT_USER=minio
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_BROWSER_REDIRECT_URL=${MINIO_BROWSER_REDIRECT_URL}
+    ports:
+      - 8881:9001
+      - 8880:9000
+    networks:
+      - outline-internal
+
+  outline:
+    image: outlinewiki/outline
+    user: root
+    restart: always
+    container_name: outline
+    command: sh -c "yarn sequelize:migrate --env=production-ssl-disabled && yarn start --env=production-ssl-disabled"
+    depends_on:
+      - outline_postgres
+      - outline_redis
+      - outline_minio
+    env_file:
+      - .env
+    environment:
+      - PGSSLMODE=disable
+      - SECRET_KEY=${SECRET_KEY}
+      - UTILS_SECRET=${UTILS_SECRET}
+      - DATABASE_URL=postgres://outline:outline@outline_postgres:5432/outline
+      - REDIS_URL=redis://outline_redis:6379
+      - URL=${WIKI_URL}
+      - PORT=9000
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_REGION=us-east-1
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_S3_UPLOAD_BUCKET_URL=${WIKIDATA_URL}
+      - AWS_S3_UPLOAD_BUCKET_NAME=outline
+      - AWS_S3_UPLOAD_MAX_SIZE=26214400
+      - AWS_S3_FORCE_PATH_STYLE=true
+      - AWS_S3_ACL=private
+      - OIDC_CLIENT_ID=${AUTH_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${AUTH_SECRET}
+      - OIDC_AUTH_URI=http://gitlab.com/oauth/authorize
+      - OIDC_TOKEN_URI=http://gitlab.com/oauth/token
+      - OIDC_USERINFO_URI=http://gitlab.com/api/v4/user
+      - OIDC_USERNAME_CLAIM=username
+      - OIDC_DISPLAY_NAME=GitLab
+      - OIDC_SCOPES=api
+      - FORCE_HTTPS=false
+      - DEPLOYMENT=hosted
+      ########## Outline mail settings
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
+      - SMTP_REPLY_EMAIL=${SMTP_REPLY_EMAIL}
+      ######### AUTH
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - SLACK_VERIFICATION_TOKEN=${SLACK_VERIFICATION_TOKEN}
+      - SLACK_APP_ID=${SLACK_APP_ID} 
+    ports:
+      - 9000:9000
+    networks:
+      - outline-internal
+      # - reverseproxy-nw  
